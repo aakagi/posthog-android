@@ -24,6 +24,18 @@ import java.util.Date
 import java.util.regex.PatternSyntaxException
 
 /**
+ * The person and groups a flag is evaluated for, which a condition that sets its own aggregation
+ * picks from instead of the flag-level identity.
+ */
+internal class ConditionTargets(
+    val distinctId: String,
+    val personProperties: Map<String, Any?>,
+    val groups: Map<String, String>,
+    val groupProperties: Map<String, Map<String, Any?>>,
+    val groupTypeMapping: Map<String, String>,
+)
+
+/**
  * Local evaluation engine for feature flags
  */
 internal class FlagEvaluator(
@@ -1518,6 +1530,9 @@ internal class FlagEvaluator(
     /**
      * Main evaluation function to match feature flag properties
      * Returns the flag value (true, false, or variant key)
+     *
+     * [distinctId] and [properties] are the flag-level identity. A condition that sets its own
+     * aggregation evaluates against [targets] instead, and is inconclusive without them.
      */
     fun matchFeatureFlagProperties(
         flag: FlagDefinition,
@@ -1526,6 +1541,7 @@ internal class FlagEvaluator(
         cohortProperties: Map<String, PropertyGroup> = emptyMap(),
         flagsByKey: Map<String, FlagDefinition>? = null,
         evaluationCache: MutableMap<String, Any?>? = null,
+        targets: ConditionTargets? = null,
     ): Any? {
         if (flag.ensureExperienceContinuity) {
             throw InconclusiveMatchException(
@@ -1550,12 +1566,14 @@ internal class FlagEvaluator(
 
         for (condition in sortedFlagConditions) {
             try {
+                val (bucketingValue, conditionProperties) =
+                    conditionTarget(flag, condition, distinctId, properties, targets)
                 // If any one condition resolves to True, we can short-circuit and return the matching variant
                 if (isConditionMatch(
                         flag,
-                        distinctId,
+                        bucketingValue,
                         condition,
-                        properties,
+                        conditionProperties,
                         cohortProperties,
                         flagsByKey,
                         evaluationCache,
@@ -1566,7 +1584,7 @@ internal class FlagEvaluator(
                         if (variantOverride != null && variantOverride in validVariantKeys) {
                             variantOverride
                         } else {
-                            getMatchingVariant(flag, distinctId)
+                            getMatchingVariant(flag, bucketingValue)
                         }
                     return variant ?: true
                 }
@@ -1581,6 +1599,46 @@ internal class FlagEvaluator(
 
         // We can only return False when either all conditions are False, or no condition was inconclusive
         return false
+    }
+
+    /**
+     * The bucketing value and properties [condition] evaluates against. A condition that omits its
+     * aggregation, or repeats the flag-level one, keeps the flag-level [distinctId] and [properties].
+     */
+    private fun conditionTarget(
+        flag: FlagDefinition,
+        condition: FlagConditionGroup,
+        distinctId: String,
+        properties: Map<String, Any?>,
+        targets: ConditionTargets?,
+    ): Pair<String, Map<String, Any?>> {
+        val aggregation = condition.aggregation ?: return distinctId to properties
+        val groupTypeIndex = aggregation.groupTypeIndex
+        if (groupTypeIndex == flag.filters.aggregationGroupTypeIndex) {
+            return distinctId to properties
+        }
+        if (targets == null) {
+            throw InconclusiveMatchException(
+                "A condition of flag \"${flag.key}\" sets its own aggregation, which needs the person and groups",
+                PostHogUnresolvedFlagReason.MISSING_CONTEXT,
+            )
+        }
+        if (groupTypeIndex == null) {
+            return targets.distinctId to targets.personProperties
+        }
+        val groupTypeName =
+            targets.groupTypeMapping[groupTypeIndex.toString()]
+                ?: throw InconclusiveMatchException(
+                    "A condition of flag \"${flag.key}\" has unknown group type index $groupTypeIndex",
+                    PostHogUnresolvedFlagReason.UNSUPPORTED_DEFINITION,
+                )
+        val groupKey =
+            targets.groups[groupTypeName]
+                ?: throw InconclusiveMatchException(
+                    "A condition of flag \"${flag.key}\" needs group \"$groupTypeName\"",
+                    PostHogUnresolvedFlagReason.MISSING_CONTEXT,
+                )
+        return groupKey to targets.groupProperties[groupTypeName].orEmpty()
     }
 
     /**

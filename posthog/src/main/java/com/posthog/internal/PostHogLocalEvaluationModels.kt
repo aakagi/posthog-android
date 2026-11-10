@@ -53,12 +53,27 @@ public class FlagFilters(
  * A condition group with properties and rollout percentage
  */
 @PostHogInternal
-public class FlagConditionGroup(
-    public val properties: List<FlagProperty>?,
-    @SerializedName("rollout_percentage")
-    public val rolloutPercentage: Double?,
-    public val variant: String?,
-)
+public class FlagConditionGroup
+    @JvmOverloads
+    constructor(
+        public val properties: List<FlagProperty>?,
+        @SerializedName("rollout_percentage")
+        public val rolloutPercentage: Double?,
+        public val variant: String?,
+        /**
+         * The condition's own aggregation, for flags that mix person and group targeting.
+         * Null when the definition omits it, so the condition inherits the flag-level aggregation.
+         */
+        @SerializedName("aggregation_group_type_index")
+        public val aggregation: ConditionAggregation? = null,
+    )
+
+/**
+ * A condition's `aggregation_group_type_index` when the definition sets it. A null
+ * [groupTypeIndex] is an explicit person aggregation, which differs from an omitted field.
+ */
+@PostHogInternal
+public class ConditionAggregation(public val groupTypeIndex: Int?)
 
 /**
  * A property condition for flag evaluation

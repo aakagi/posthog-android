@@ -313,4 +313,27 @@ internal class PostHogSerializerTest {
 
         assertEquals(expectedJson, actualJson)
     }
+
+    @Test
+    fun `keeps an explicit null condition aggregation apart from an omitted one`() {
+        val sut = getSut()
+        val json =
+            """
+            [
+                { "properties": [], "rollout_percentage": 100 },
+                { "properties": [], "rollout_percentage": 100, "aggregation_group_type_index": null },
+                { "properties": [], "rollout_percentage": 100, "aggregation_group_type_index": 2 }
+            ]
+            """.trimIndent()
+
+        fun aggregations(conditions: List<FlagConditionGroup>) = conditions.map { it.aggregation?.let { a -> listOf(a.groupTypeIndex) } }
+
+        val parsed = sut.deserialize<List<FlagConditionGroup>>(json.reader())
+        val writer = StringWriter()
+        sut.serialize(parsed, writer)
+        val reparsed = sut.deserialize<List<FlagConditionGroup>>(writer.toString().reader())
+
+        assertEquals(listOf(null, listOf(null), listOf(2)), aggregations(parsed))
+        assertEquals(aggregations(parsed), aggregations(reparsed))
+    }
 }
