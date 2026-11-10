@@ -1051,6 +1051,14 @@ internal class PostHogFeatureFlags(
             cohortProperties = snapshot.cohorts ?: EMPTY_COHORT_PROPERTIES,
             flagsByKey = flags,
             evaluationCache = evaluationCache,
+            targets =
+                ConditionTargets(
+                    distinctId = distinctId,
+                    personProperties = personProperties ?: EMPTY_PROPERTIES,
+                    groups = groups.orEmpty(),
+                    groupProperties = groupProperties.orEmpty(),
+                    groupTypeMapping = snapshot.groupTypeMapping.orEmpty(),
+                ),
         )
     }
 
